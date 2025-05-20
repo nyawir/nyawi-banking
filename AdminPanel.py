@@ -1,6 +1,8 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 import sqlite3
-
+from UserManagement import Ui_UserManagement
+from TransactionLogs import Ui_TransactionLogs  # Ensure this is implemented
+from FraudLogs import Ui_FraudLogs  # Ensure this is implemented
 
 class Ui_AdminPanel(object):
     def setupUi(self, AdminPanel):
@@ -64,20 +66,45 @@ class Ui_AdminPanel(object):
 
     def manage_users(self):
         print("Manage Users clicked")
-        # Add functionality to view, add, delete, or update users in the database
+        # Open a new window for managing users
+        self.user_management_window = QtWidgets.QMainWindow()
+        self.ui = Ui_UserManagement()  # Create a new class `Ui_UserManagement` for user management
+        self.ui.setupUi(self.user_management_window)
+        self.user_management_window.show()
 
     def view_transactions(self):
         print("View Transactions clicked")
-        # Add functionality to display transaction logs from the database
+        # Fetch transaction logs from the database
+        conn = sqlite3.connect("BankNH.db")
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM Transactions")  # Updated table name
+        transactions = cur.fetchall()
+        conn.close()
+
+        # Display transactions in a new window
+        self.transaction_window = QtWidgets.QMainWindow()
+        self.ui = Ui_TransactionLogs()
+        self.ui.setupUi(self.transaction_window, transactions)
+        self.transaction_window.show()
 
     def view_fraud_logs(self):
         print("View Fraud Logs clicked")
-        # Add functionality to display flagged transactions
+        # Fetch fraud logs from the database
+        conn = sqlite3.connect("BankNH.db")
+        cur = conn.cursor()
+        cur.execute("SELECT id, transaction_id, reason, timestamp FROM FraudLogs")
+        fraud_logs = cur.fetchall()
+        conn.close()
+
+        # Display fraud logs in a new window
+        self.fraud_logs_window = QtWidgets.QMainWindow()
+        self.ui = Ui_FraudLogs()
+        self.ui.setupUi(self.fraud_logs_window, fraud_logs)
+        self.fraud_logs_window.show()
 
     def logout(self):
         print("Logout clicked")
         QtWidgets.QApplication.quit()
-
 
 if __name__ == "__main__":
     import sys

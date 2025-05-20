@@ -161,7 +161,9 @@ class Ui_MainWindow(QWidget):
 
     from PyQt5.QtWidgets import QInputDialog, QMessageBox
 
-    # ...
+    # Ensure all database queries use the correct table and column names:
+    # - Transactions: sender, receiver, ttype, amount, sender_old_balance, sender_new_balance, receiver_old_balance, receiver_new_balance, timestamp
+    # - Users: id, username, role
 
     def CheckBal(self):
         import sqlite3

@@ -133,42 +133,19 @@ class Ui_TransferWindow(object):
     def SendTransfer(self):
         import sqlite3
 
-        # Create a connection to the BANKNH database
         conn = sqlite3.connect("BankNH.db")
         cur = conn.cursor()
-
-        # Create the NEW table if it doesn't exist
-        create_new_table_sql = """
-        CREATE TABLE IF NOT EXISTS NEWT (
-            SENDER TEXT,
-            RECEIVER TEXT,
-            TTYPE TEXT,
-            AMOUNT REAL,
-            SENDEROLDBAL REAL,
-            SENDERNEWBAL REAL,
-            RECOLDBAL REAL,
-            RECNEWBAL REAL
-        );
-        """
-
-        cur.execute(create_new_table_sql)
-
-        # Get user input
         sender_username = self.lineEdit_name2txf.text()
         amount_str = self.lineEdit_amount2txf.text()
         receiver_username = self.lineEdit_number2txf.text()
         selected_type = self.comboBox_accountType.currentText()
 
         try:
-            # Check if the sender's username exists in the database
             cur.execute("SELECT USERNAME, BAL FROM NEWBANK WHERE USERNAME = ?", (sender_username,))
             sender_data = cur.fetchone()
 
             if sender_data is not None:
-                # Get sender's balance
                 sender_balance = sender_data[-1]
-
-                # Convert amount to a float and check if it's a valid number
                 try:
                     amount = float(amount_str)
                     if amount <= 0:
@@ -178,74 +155,68 @@ class Ui_TransferWindow(object):
                     conn.close()
                     return
 
-                # Check if the sender has sufficient balance
                 if sender_balance >= amount:
-                    # Deduct the amount from the sender's balance
-                    sender_balance -= amount
+                    sender_old_balance = sender_balance
+                    sender_new_balance = sender_balance - amount
 
-                    # Update sender's balance in the database
-
-                    # Check if the receiver's username exists in the database
                     cur.execute("SELECT USERNAME, BAL FROM NEWBANK WHERE USERNAME = ?", (receiver_username,))
                     receiver_data = cur.fetchone()
 
                     if receiver_data is not None:
-                        # Get receiver's balance
-                        receiver_balance = receiver_data[1]
+                        receiver_old_balance = receiver_data[1]
+                        receiver_new_balance = receiver_old_balance + amount
 
-                        # Add the amount to the receiver's balance
-                        receiver_balance += amount
-
-                        # Update receiver's balance in the database
-                        cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?", (sender_balance, sender_username))
-
-                        cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?",
-                                    (receiver_balance, receiver_username))
-
-                        # Commit the changes to the database
+                        cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?", (sender_new_balance, sender_username))
+                        cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?", (receiver_new_balance, receiver_username))
                         conn.commit()
-                        # Insert the transaction data into the BANKMT table
+
+                        # Insert transaction into Transactions table
                         cur.execute("""
-                            INSERT INTO NEWT (SENDER, RECEIVER, TTYPE, AMOUNT, SENDEROLDBAL, SENDERNEWBAL, RECOLDBAL, RECNEWBAL)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO Transactions (
+                                sender, receiver, ttype, amount,
+                                sender_old_balance, sender_new_balance,
+                                receiver_old_balance, receiver_new_balance
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             sender_username,
                             receiver_username,
                             selected_type,
                             amount,
-                            sender_balance + amount,  # SENDERNEWBAL
-                            sender_balance,  # SENDEROLDBAL
-                            receiver_balance - amount,  # RECOLDBAL
-                            receiver_balance  # RECNEWBAL
+                            sender_old_balance,
+                            sender_new_balance,
+                            receiver_old_balance,
+                            receiver_new_balance
                         ))
-                        print("Transaction Data:")
-                        print(f"Sender: {sender_username}")
-                        print(f"Receiver: {receiver_username}")
-                        print(f"Amount: {amount}")
-                        print(f"Sender Old Balance: {sender_balance}")
-                        print(f"Sender New Balance: {sender_balance - amount}")
-                        print(f"Receiver Old Balance: {receiver_balance}")
-                        print(f"Receiver New Balance: {receiver_balance + amount}")
-                        # Commit the changes to the BANKMT database
                         conn.commit()
-                        sendernew = sender_balance - amount
-                        receivernew = receiver_balance + amount
 
-                        list = [random.randint(0, 9), selected_type, amount,sender_balance, sendernew, receiver_balance, receivernew]
-                        print(list)
-                        # Show a success message
-                        self.load(list)
+                        # Get the last inserted transaction id
+                        transaction_id = cur.lastrowid
+
+                        # Prepare data for ML model
+                        features = [
+                            random.randint(0, 9), selected_type, amount,
+                            sender_old_balance, sender_new_balance,
+                            receiver_old_balance, receiver_new_balance
+                        ]
+                        # Fraud detection
+                        is_fraud = self.detect_fraud(features)
+                        if is_fraud:
+                            reason = "ML model flagged as fraud"
+                            cur.execute("""
+                                INSERT INTO FraudLogs (transaction_id, reason)
+                                VALUES (?, ?)
+                            """, (transaction_id, reason))
+                            conn.commit()
+                            self.message('Fraud Detected', 'This transaction was flagged as fraudulent and logged.')
+
+                        self.load(features)
                     else:
-                        # Show an error message for receiver not found
                         self.message('Receiver Not Found', 'Receiver username not found.')
                 else:
-                    # Show an error message for insufficient balance
                     self.message('Insufficient Balance', 'You have insufficient balance for this transfer.')
             else:
-                # Show an error message for sender not found
                 self.message('Sender Not Found', 'Sender username not found.')
 
-            # Debugging: Print sender and receiver usernames for troubleshooting
             print(f"Sender Username: {sender_username}")
             print(f"Receiver Username: {receiver_username}")
 
@@ -253,6 +224,16 @@ class Ui_TransferWindow(object):
             self.message('Database Error', str(e))
         finally:
             conn.close()
+
+    def detect_fraud(self, features):
+        # features: [count, type, amount, oldbalanceOrig, newbalanceOrig, oldbalanceDest, newbalanceDest]
+        df = pd.DataFrame([features])
+        df.rename(columns={0:'count', 1:'type',2: 'amount', 3:'oldbalanceOrig',4: 'newbalanceOrig',
+                                   5:'oldbalanceDest',6: 'newbalanceDest'}, inplace=True)
+        loaded_model = joblib.load("banking_app_rf.pkl")
+        processed = self.pipeline(df)
+        prediction = loaded_model.predict(processed)
+        return prediction[0] == 1
 
     def CancleTxf(self):
         self.transfer.close()
