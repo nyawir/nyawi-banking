@@ -189,16 +189,13 @@ class Ui_TransferWindow(object):
                         ))
                         conn.commit()
 
-                        # Get the last inserted transaction id
                         transaction_id = cur.lastrowid
 
-                        # Prepare data for ML model
                         features = [
                             random.randint(0, 9), selected_type, amount,
                             sender_old_balance, sender_new_balance,
                             receiver_old_balance, receiver_new_balance
                         ]
-                        # Fraud detection
                         is_fraud = self.detect_fraud(features)
                         if is_fraud:
                             reason = "ML model flagged as fraud"
@@ -208,8 +205,9 @@ class Ui_TransferWindow(object):
                             """, (transaction_id, reason))
                             conn.commit()
                             self.message('Fraud Detected', 'This transaction was flagged as fraudulent and logged.')
-
-                        self.load(features)
+                        else:
+                            self.message('Transaction Success', 'Transaction done.')
+                        # No need to call self.load(features) here, as it duplicates the ML check and message
                     else:
                         self.message('Receiver Not Found', 'Receiver username not found.')
                 else:
@@ -273,68 +271,26 @@ class Ui_TransferWindow(object):
         return row_preprocessed
 
     def load(self, list):
+        # This function is now not used in SendTransfer, but can be used for testing
         df = pd.DataFrame([list])
         df.rename(columns={0:'count', 1:'type',2: 'amount', 3:'oldbalanceOrig',4: 'newbalanceOrig',
                                    5:'oldbalanceDest',6: 'newbalanceDest'}, inplace=True)
         print(df)
         loaded_model = joblib.load("banking_app_rf.pkl")
-        self.pipeline(df)
-        prediction = loaded_model.predict(self.pipeline(df))
-        if prediction == 1:
+        processed = self.pipeline(df)
+        prediction = loaded_model.predict(processed)
+        if prediction[0] == 1:
             message = 'Invalid Amount. Please enter a valid positive amount.'
         else:
             message = 'Transaction done.'
 
-        app = QApplication(sys.argv)
-
-        # Display the message using QMessageBox
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Information)
         msg.setText(message)
         msg.setWindowTitle('Transaction Result')
         msg.setStandardButtons(QMessageBox.Ok)
         msg.exec_()
-
-        # Exit the application
-        sys.exit(app.exec_())
-
-    # def update_table(self):
-    #     conn = sqlite3.connect('BankNH.db')
-    #     cur = conn.cursor()
-    #     sender_username = self.lineEdit_name2txf.text()
-    #     amount = self.lineEdit_amount2txf.text()
-    #     receiver_username = self.lineEdit_number2txf.text()
-    #     selected_type = self.comboBox_accountType.currentText()
-    #     cur.execute("SELECT USERNAME, BAL FROM NEWBANK WHERE USERNAME = ?", (sender_username,))
-    #     sender_balance = cur.fetchone()
-    #     cur.execute("SELECT USERNAME, BAL FROM NEWBANK WHERE USERNAME = ?", (receiver_username,))
-    #     receiver_balance = cur.fetchone()
-    #
-    #     cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?", (sender_balance, sender_username))
-    #
-    #     cur.execute("UPDATE NEWBANK SET BAL = ? WHERE USERNAME = ?",
-    #                 (receiver_balance, receiver_username))
-    #
-    #     # Commit the changes to the database
-    #     conn.commit()
-    #     # Insert the transaction data into the BANKMT table
-    #     cur.execute("""
-    #         INSERT INTO NEWT (SENDER, RECEIVER, TTYPE, AMOUNT, SENDEROLDBAL, SENDERNEWBAL, RECOLDBAL, RECNEWBAL)
-    #         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    #     """, (
-    #         sender_username,
-    #         receiver_username,
-    #         selected_type,
-    #         amount,
-    #         sender_balance + amount,  # SENDERNEWBAL
-    #         sender_balance,  # SENDEROLDBAL
-    #         receiver_balance - amount,  # RECOLDBAL
-    #         receiver_balance  # RECNEWBAL
-    #     ))
-    #     conn.commit()
-    #     conn.close()
-
-
+    # ...existing code...
     def retranslateUi(self, TransferWindow):
         _translate = QtCore.QCoreApplication.translate
         TransferWindow.setWindowTitle(_translate("TransferWindow", "Transfer"))
